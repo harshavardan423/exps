@@ -112,49 +112,63 @@ def heartbeat(token):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+# In your exposure server (app.py at exps-fdlh.onrender.com), add these modifications:
+
 @app.route('/deregister/<token>', methods=['DELETE'])
 def deregister_instance(token):
     try:
         instance = ExposedInstance.query.filter_by(token=token).first()
-        if not instance:
-            return jsonify({'error': 'Instance not found'}), 404
-        
-        db.session.delete(instance)
-        db.session.commit()
-        return jsonify({'status': 'Instance deregistered successfully'}), 200
+        if instance:
+            db.session.delete(instance)
+            db.session.commit()
+            return jsonify({'status': 'Instance deregistered successfully'}), 200
+        return jsonify({'error': 'Instance not found'}), 404
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-# Modify the proxy_request function to include better error handling
 @app.route('/<username>', methods=['GET', 'POST', 'PUT', 'DELETE'])
 @app.route('/<username>/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def proxy_request(username, subpath=""):
     try:
         instance = ExposedInstance.query.filter_by(username=username).first()
         if not instance:
-            return jsonify({'error': 'Instance not found or not exposed'}), 404
+            return jsonify({'error': 'Instance not found'}), 404
         
         # Check if instance is still alive
         if (datetime.utcnow() - instance.last_heartbeat).total_seconds() > 300:
-            # Clean up dead instance
-            db.session.delete(instance)
-            db.session.commit()
-            return jsonify({'error': 'Instance is offline'}), 503
+            return jsonify({'error': 'Instance not responding'}), 503
         
         target_url = f"{instance.local_url.rstrip('/')}/{subpath}"
         print(f"Proxying request to: {target_url}")
+        
+        # Add custom headers to help with routing
+        headers = {key: value for key, value in request.headers.items() 
+                  if key.lower() not in ['host', 'content-length']}
+        headers['X-Forwarded-For'] = request.remote_addr
+        headers['X-Forwarded-Proto'] = request.scheme
+        headers['X-Forwarded-Host'] = request.host
         
         try:
             response = requests.request(
                 method=request.method,
                 url=target_url,
-                headers={key: value for key, value in request.headers.items() 
-                        if key.lower() not in ['host', 'content-length']},
+                headers=headers,
                 data=request.get_data(),
                 params=request.args,
-                timeout=10  # Reduced timeout
+                timeout=30,
+                allow_redirects=False  # Handle redirects manually
             )
+            
+            # Handle redirects manually to maintain the proxy URL
+            if response.status_code in [301, 302, 303, 307, 308]:
+                location = response.headers.get('Location')
+                if location:
+                    if location.startswith('/'):
+                        new_location = f"/{username}{location}"
+                    else:
+                        new_location = f"/{username}/{location}"
+                    response.headers['Location'] = new_location
             
             excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
             headers = [(name, value) for (name, value) in response.raw.headers.items()
@@ -163,17 +177,16 @@ def proxy_request(username, subpath=""):
             return response.content, response.status_code, headers
             
         except requests.exceptions.ConnectionError:
-            # Clean up instance if we can't connect
-            db.session.delete(instance)
-            db.session.commit()
             return jsonify({
-                'error': 'Failed to connect to local instance. The instance may be behind a firewall or NAT.',
-                'url': target_url
+                'error': 'Failed to connect to local instance',
+                'url': target_url,
+                'message': 'The instance appears to be offline or unreachable'
             }), 502
         except requests.exceptions.Timeout:
             return jsonify({
-                'error': 'Request timed out. Please check your network connection.',
-                'url': target_url
+                'error': 'Request timed out',
+                'url': target_url,
+                'message': 'The instance took too long to respond'
             }), 504
             
     except Exception as e:
