@@ -125,43 +125,33 @@ def proxy_request(username, subpath=""):
             return jsonify({'error': 'Instance not responding'}), 503
         
         target_url = f"{instance.local_url.rstrip('/')}/{subpath}"
-        print(f"Forwarding request to: {target_url}")  # Debug print
-        
-        headers = {
-            key: value for key, value in request.headers.items()
-            if key.lower() not in ['host', 'content-length']
-        }
+        print(f"Proxying request to: {target_url}")
         
         try:
             response = requests.request(
                 method=request.method,
                 url=target_url,
-                headers=headers,
+                headers={key: value for key, value in request.headers.items() 
+                        if key.lower() not in ['host', 'content-length']},
                 data=request.get_data(),
-                cookies=request.cookies,
-                allow_redirects=False,
+                params=request.args,
                 timeout=30
             )
             
-            return (response.content, response.status_code, 
-                   {k: v for k, v in response.headers.items() 
-                    if k.lower() not in ['content-encoding', 'transfer-encoding']})
+            excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+            headers = [(name, value) for (name, value) in response.raw.headers.items()
+                      if name.lower() not in excluded_headers]
             
-        except requests.exceptions.ConnectTimeout:
-            return jsonify({
-                'error': 'Connection timed out',
-                'target_url': target_url
-            }), 504
-        except requests.exceptions.RequestException as e:
-            return jsonify({
-                'error': f'Failed to forward request: {str(e)}',
-                'target_url': target_url
-            }), 502
+            return response.content, response.status_code, headers
+            
+        except requests.exceptions.ConnectionError:
+            return jsonify({'error': 'Failed to connect to local instance', 'url': target_url}), 502
+        except requests.exceptions.Timeout:
+            return jsonify({'error': 'Request timed out', 'url': target_url}), 504
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500
         
-
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({'error': 'Not found'}), 404
