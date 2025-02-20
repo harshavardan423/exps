@@ -124,8 +124,8 @@ def proxy_request(username, subpath=""):
         if (datetime.utcnow() - instance.last_heartbeat).total_seconds() > 300:
             return jsonify({'error': 'Instance not responding'}), 503
         
-        # Use the actual registered local_url from the instance
-        target_url = f"{instance.local_url}/{subpath}"
+        target_url = f"{instance.local_url.rstrip('/')}/{subpath}"
+        print(f"Forwarding request to: {target_url}")  # Debug print
         
         headers = {
             key: value for key, value in request.headers.items()
@@ -143,13 +143,16 @@ def proxy_request(username, subpath=""):
                 timeout=30
             )
             
-            response_headers = {
-                key: value for key, value in response.headers.items()
-                if key.lower() not in ['content-encoding', 'transfer-encoding']
-            }
+            return (response.content, response.status_code, 
+                   {k: v for k, v in response.headers.items() 
+                    if k.lower() not in ['content-encoding', 'transfer-encoding']})
             
-            return response.content, response.status_code, response_headers
-        except requests.RequestException as e:
+        except requests.exceptions.ConnectTimeout:
+            return jsonify({
+                'error': 'Connection timed out',
+                'target_url': target_url
+            }), 504
+        except requests.exceptions.RequestException as e:
             return jsonify({
                 'error': f'Failed to forward request: {str(e)}',
                 'target_url': target_url
