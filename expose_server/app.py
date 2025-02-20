@@ -120,14 +120,13 @@ def proxy_request(username, subpath=""):
         if not instance:
             return jsonify({'error': 'Instance not found'}), 404
         
-        # Check if instance is still alive (within last 5 minutes)
+        # Check if instance is still alive
         if (datetime.utcnow() - instance.last_heartbeat).total_seconds() > 300:
             return jsonify({'error': 'Instance not responding'}), 503
         
-        # Modify the target URL to use localhost instead of the IP
-        target_url = f"http://localhost:5000/{subpath}"
+        # Use the actual registered local_url from the instance
+        target_url = f"{instance.local_url}/{subpath}"
         
-        # Filter out problematic headers
         headers = {
             key: value for key, value in request.headers.items()
             if key.lower() not in ['host', 'content-length']
@@ -144,7 +143,6 @@ def proxy_request(username, subpath=""):
                 timeout=30
             )
             
-            # Filter response headers
             response_headers = {
                 key: value for key, value in response.headers.items()
                 if key.lower() not in ['content-encoding', 'transfer-encoding']
@@ -152,7 +150,10 @@ def proxy_request(username, subpath=""):
             
             return response.content, response.status_code, response_headers
         except requests.RequestException as e:
-            return jsonify({'error': f'Failed to forward request: {str(e)}'}), 502
+            return jsonify({
+                'error': f'Failed to forward request: {str(e)}',
+                'target_url': target_url
+            }), 502
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500
