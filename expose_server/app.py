@@ -124,8 +124,8 @@ def proxy_request(username, subpath=""):
         if (datetime.utcnow() - instance.last_heartbeat).total_seconds() > 300:
             return jsonify({'error': 'Instance not responding'}), 503
         
-        # Forward the request to the local instance
-        target_url = f"{instance.local_url.rstrip('/')}/{subpath}"
+        # Modify the target URL to use localhost instead of the IP
+        target_url = f"http://localhost:5000/{subpath}"
         
         # Filter out problematic headers
         headers = {
@@ -141,7 +141,7 @@ def proxy_request(username, subpath=""):
                 data=request.get_data(),
                 cookies=request.cookies,
                 allow_redirects=False,
-                timeout=30  # Add timeout to prevent hanging
+                timeout=30
             )
             
             # Filter response headers
@@ -156,6 +156,7 @@ def proxy_request(username, subpath=""):
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+        
 
 @app.errorhandler(404)
 def not_found(e):
