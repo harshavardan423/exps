@@ -40,10 +40,29 @@ def create_tables():
 
 @app.route('/')
 def index():
-    return jsonify({
-        'status': 'running',
-        'message': 'Expose Server is running'
-    })
+    try:
+        # Fetch all instances
+        instances = ExposedInstance.query.all()
+
+        # Filter active instances (heartbeat within the last 5 minutes)
+        active_instances = [
+            {
+                'username': instance.username,
+                'local_url': instance.local_url
+            }
+            for instance in instances
+            if (datetime.utcnow() - instance.last_heartbeat).total_seconds() <= 300
+        ]
+
+        return jsonify({
+            'status': 'running',
+            'message': 'Expose Server is running',
+            'active_instance_count': len(active_instances),
+            'active_instances': active_instances
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/register', methods=['POST'])
 def register_instance():
