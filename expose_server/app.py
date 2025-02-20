@@ -112,17 +112,35 @@ def heartbeat(token):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/deregister/<token>', methods=['DELETE'])
+def deregister_instance(token):
+    try:
+        instance = ExposedInstance.query.filter_by(token=token).first()
+        if not instance:
+            return jsonify({'error': 'Instance not found'}), 404
+        
+        db.session.delete(instance)
+        db.session.commit()
+        return jsonify({'status': 'Instance deregistered successfully'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+# Modify the proxy_request function to include better error handling
 @app.route('/<username>', methods=['GET', 'POST', 'PUT', 'DELETE'])
 @app.route('/<username>/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def proxy_request(username, subpath=""):
     try:
         instance = ExposedInstance.query.filter_by(username=username).first()
         if not instance:
-            return jsonify({'error': 'Instance not found'}), 404
+            return jsonify({'error': 'Instance not found or not exposed'}), 404
         
         # Check if instance is still alive
         if (datetime.utcnow() - instance.last_heartbeat).total_seconds() > 300:
-            return jsonify({'error': 'Instance not responding'}), 503
+            # Clean up dead instance
+            db.session.delete(instance)
+            db.session.commit()
+            return jsonify({'error': 'Instance is offline'}), 503
         
         target_url = f"{instance.local_url.rstrip('/')}/{subpath}"
         print(f"Proxying request to: {target_url}")
@@ -135,7 +153,7 @@ def proxy_request(username, subpath=""):
                         if key.lower() not in ['host', 'content-length']},
                 data=request.get_data(),
                 params=request.args,
-                timeout=30
+                timeout=10  # Reduced timeout
             )
             
             excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
@@ -145,9 +163,18 @@ def proxy_request(username, subpath=""):
             return response.content, response.status_code, headers
             
         except requests.exceptions.ConnectionError:
-            return jsonify({'error': 'Failed to connect to local instance', 'url': target_url}), 502
+            # Clean up instance if we can't connect
+            db.session.delete(instance)
+            db.session.commit()
+            return jsonify({
+                'error': 'Failed to connect to local instance. The instance may be behind a firewall or NAT.',
+                'url': target_url
+            }), 502
         except requests.exceptions.Timeout:
-            return jsonify({'error': 'Request timed out', 'url': target_url}), 504
+            return jsonify({
+                'error': 'Request timed out. Please check your network connection.',
+                'url': target_url
+            }), 504
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500
