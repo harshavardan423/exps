@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, redirect
+from flask import Flask, request, jsonify, render_template_string, redirect
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 import requests
@@ -11,12 +11,101 @@ app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app)
 CORS(app)
 
-# Configure SQLAlchemy
+# Database configuration
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'exposed_instances.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
+# HTML Templates
+BASE_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ title }} - {{ username }}'s Atom Instance</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body class="bg-gray-100">
+    <nav class="bg-white shadow-lg">
+        <div class="max-w-6xl mx-auto px-4">
+            <div class="flex justify-between">
+                <div class="flex space-x-7">
+                    <div class="flex items-center py-4">
+                        <span class="font-semibold text-gray-500 text-lg">{{ username }}'s Atom</span>
+                    </div>
+                    <div class="hidden md:flex items-center space-x-1">
+                        <a href="/{{ username }}/home" class="py-4 px-2 text-gray-500 hover:text-gray-900">Home</a>
+                        <a href="/{{ username }}/files" class="py-4 px-2 text-gray-500 hover:text-gray-900">Files</a>
+                        <a href="/{{ username }}/behaviors" class="py-4 px-2 text-gray-500 hover:text-gray-900">Behaviors</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+    
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-2xl font-bold mb-6">{{ title }}</h1>
+        <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            {{ content | safe }}
+        </div>
+        
+        {% if instance_status %}
+        <div class="mt-4 p-4 rounded {% if instance_status == 'online' %}bg-green-100{% else %}bg-yellow-100{% endif %}">
+            <p class="text-sm">
+                Instance Status: 
+                <span class="font-semibold">
+                    {% if instance_status == 'online' %}
+                        Online
+                    {% else %}
+                        Offline (showing cached data)
+                    {% endif %}
+                </span>
+            </p>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
+"""
+
+INDEX_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Atom Exposure Server</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-6">Active Atom Instances</h1>
+        
+        {% if instances %}
+            <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {% for instance in instances %}
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h2 class="text-xl font-semibold mb-2">{{ instance.username }}</h2>
+                        <div class="space-y-2">
+                            <a href="/{{ instance.username }}/home" 
+                               class="block w-full text-center bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded">
+                                View Instance
+                            </a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="bg-white rounded-lg shadow p-6">
+                <p class="text-gray-500">No active instances available.</p>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>
+"""
+
+# Database Model
 class ExposedInstance(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, nullable=False)
@@ -24,6 +113,12 @@ class ExposedInstance(db.Model):
     local_url = db.Column(db.String(200), nullable=False)
     token = db.Column(db.String(100), unique=True, nullable=False)
     last_heartbeat = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    
+    # Cached data
+    home_data = db.Column(db.JSON, nullable=True)
+    files_data = db.Column(db.JSON, nullable=True)
+    behaviors_data = db.Column(db.JSON, nullable=True)
+    last_data_sync = db.Column(db.DateTime, nullable=True)
     
     def to_dict(self):
         return {
@@ -33,36 +128,133 @@ class ExposedInstance(db.Model):
             'token': self.token,
             'last_heartbeat': self.last_heartbeat.isoformat()
         }
+    
+    def is_online(self):
+        return (datetime.utcnow() - self.last_heartbeat).total_seconds() <= 300
 
 def create_tables():
     with app.app_context():
         db.create_all()
 
+def render_page(username, title, content, instance_status=None):
+    return render_template_string(
+        BASE_TEMPLATE, 
+        username=username,
+        title=title,
+        content=content,
+        instance_status=instance_status
+    )
+
+def fetch_local_data(instance, endpoint):
+    """Fetch data from local instance with timeout"""
+    try:
+        response = requests.get(
+            f"{instance.local_url}/api/{endpoint}",
+            timeout=5
+        )
+        if response.ok:
+            return response.json(), True
+    except:
+        pass
+    return None, False
+
+# Routes
 @app.route('/')
 def index():
     try:
-        # Fetch all instances
         instances = ExposedInstance.query.all()
-
-        # Filter active instances (heartbeat within the last 5 minutes)
         active_instances = [
-            {
-                'username': instance.username,
-                'local_url': instance.local_url
-            }
-            for instance in instances
+            instance for instance in instances
             if (datetime.utcnow() - instance.last_heartbeat).total_seconds() <= 300
         ]
-
-        return jsonify({
-            'status': 'running',
-            'message': 'Expose Server is running',
-            'active_instance_count': len(active_instances),
-            'active_instances': active_instances
-        })
+        
+        return render_template_string(
+            INDEX_TEMPLATE,
+            instances=active_instances
+        )
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/<username>/home')
+def user_home(username):
+    instance = ExposedInstance.query.filter_by(username=username).first()
+    if not instance:
+        return jsonify({'error': 'User not found'}), 404
+
+    data, is_fresh = fetch_local_data(instance, 'home_data')
+    if data:
+        instance.home_data = data
+        instance.last_data_sync = datetime.utcnow()
+        db.session.commit()
+    elif instance.home_data:
+        data = instance.home_data
+    else:
+        data = {"message": "No data available"}
+
+    content = f"""
+        <div class="space-y-4">
+            <div class="text-lg">Welcome to {username}'s Atom Instance</div>
+            <div class="text-gray-600">
+                Last updated: {instance.last_data_sync.strftime('%Y-%m-%d %H:%M:%S') if instance.last_data_sync else 'Never'}
+            </div>
+            <pre class="bg-gray-100 p-4 rounded overflow-auto">{str(data)}</pre>
+        </div>
+    """
+    
+    return render_page(username, "Home", content, 
+                      instance_status='online' if is_fresh else 'offline')
+
+@app.route('/<username>/files')
+def user_files(username):
+    instance = ExposedInstance.query.filter_by(username=username).first()
+    if not instance:
+        return jsonify({'error': 'User not found'}), 404
+
+    data, is_fresh = fetch_local_data(instance, 'files_data')
+    if data:
+        instance.files_data = data
+        instance.last_data_sync = datetime.utcnow()
+        db.session.commit()
+    elif instance.files_data:
+        data = instance.files_data
+    else:
+        data = {"message": "No files data available"}
+
+    content = f"""
+        <div class="space-y-4">
+            <div class="text-lg">Files View</div>
+            <pre class="bg-gray-100 p-4 rounded overflow-auto">{str(data)}</pre>
+        </div>
+    """
+    
+    return render_page(username, "Files", content,
+                      instance_status='online' if is_fresh else 'offline')
+
+@app.route('/<username>/behaviors')
+def user_behaviors(username):
+    instance = ExposedInstance.query.filter_by(username=username).first()
+    if not instance:
+        return jsonify({'error': 'User not found'}), 404
+
+    data, is_fresh = fetch_local_data(instance, 'behaviors_data')
+    if data:
+        instance.behaviors_data = data
+        instance.last_data_sync = datetime.utcnow()
+        db.session.commit()
+    elif instance.behaviors_data:
+        data = instance.behaviors_data
+    else:
+        data = {"message": "No behaviors data available"}
+
+    content = f"""
+        <div class="space-y-4">
+            <div class="text-lg">Behaviors</div>
+            <pre class="bg-gray-100 p-4 rounded overflow-auto">{str(data)}</pre>
+        </div>
+    """
+    
+    return render_page(username, "Behaviors", content,
+                      instance_status='online' if is_fresh else 'offline')
 
 @app.route('/register', methods=['POST'])
 def register_instance():
@@ -112,8 +304,6 @@ def heartbeat(token):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-# In your exposure server (app.py at exps-fdlh.onrender.com), add these modifications:
-
 @app.route('/deregister/<token>', methods=['DELETE'])
 def deregister_instance(token):
     try:
@@ -127,71 +317,6 @@ def deregister_instance(token):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/<username>', methods=['GET', 'POST', 'PUT', 'DELETE'])
-@app.route('/<username>/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE'])
-def proxy_request(username, subpath=""):
-    try:
-        instance = ExposedInstance.query.filter_by(username=username).first()
-        if not instance:
-            return jsonify({'error': 'Instance not found'}), 404
-        
-        # Check if instance is still alive
-        if (datetime.utcnow() - instance.last_heartbeat).total_seconds() > 300:
-            return jsonify({'error': 'Instance not responding'}), 503
-        
-        target_url = f"{instance.local_url.rstrip('/')}/{subpath}"
-        print(f"Proxying request to: {target_url}")
-        
-        # Add custom headers to help with routing
-        headers = {key: value for key, value in request.headers.items() 
-                  if key.lower() not in ['host', 'content-length']}
-        headers['X-Forwarded-For'] = request.remote_addr
-        headers['X-Forwarded-Proto'] = request.scheme
-        headers['X-Forwarded-Host'] = request.host
-        
-        try:
-            response = requests.request(
-                method=request.method,
-                url=target_url,
-                headers=headers,
-                data=request.get_data(),
-                params=request.args,
-                timeout=30,
-                allow_redirects=False  # Handle redirects manually
-            )
-            
-            # Handle redirects manually to maintain the proxy URL
-            if response.status_code in [301, 302, 303, 307, 308]:
-                location = response.headers.get('Location')
-                if location:
-                    if location.startswith('/'):
-                        new_location = f"/{username}{location}"
-                    else:
-                        new_location = f"/{username}/{location}"
-                    response.headers['Location'] = new_location
-            
-            excluded_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
-            headers = [(name, value) for (name, value) in response.raw.headers.items()
-                      if name.lower() not in excluded_headers]
-            
-            return response.content, response.status_code, headers
-            
-        except requests.exceptions.ConnectionError:
-            return jsonify({
-                'error': 'Failed to connect to local instance',
-                'url': target_url,
-                'message': 'The instance appears to be offline or unreachable'
-            }), 502
-        except requests.exceptions.Timeout:
-            return jsonify({
-                'error': 'Request timed out',
-                'url': target_url,
-                'message': 'The instance took too long to respond'
-            }), 504
-            
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-        
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({'error': 'Not found'}), 404
@@ -200,9 +325,6 @@ def not_found(e):
 def server_error(e):
     return jsonify({'error': 'Internal server error'}), 500
 
-def main():
-    create_tables()
-    app.run(host='0.0.0.0', port=5000, debug=False)
-
 if __name__ == '__main__':
-    main()
+    create_tables()
+    app.run(host='0.0.0.0', port=5000)
