@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template_string, redirect
+from flask import Flask, request, jsonify, render_template_string, redirect,session
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 import requests
@@ -157,6 +157,20 @@ def fetch_local_data(instance, endpoint):
     except:
         pass
     return None, False
+    
+def check_access(instance, request):
+    """Check if current user has access to the instance"""
+    if not instance.expose:
+        return False
+        
+    user_email = request.args.get('email')  # Get email from query params
+    
+    # If no allowed users set, allow all access
+    if not instance.allowed_users:
+        return True
+        
+    return user_email in instance.allowed_users
+
 
 # Routes
 @app.route('/')
@@ -175,12 +189,40 @@ def index():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/<username>/home')
 def user_home(username):
     instance = ExposedInstance.query.filter_by(username=username).first()
     if not instance:
         return jsonify({'error': 'User not found'}), 404
 
+     if not check_access(instance, request):
+        return render_template_string("""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Access Required</title>
+                <script src="https://cdn.tailwindcss.com"></script>
+            </head>
+            <body class="bg-gray-100">
+                <div class="container mx-auto px-4 py-8">
+                    <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                        <h1 class="text-2xl font-bold mb-4">Access Required</h1>
+                        <p class="mb-4">Please enter your email to access this instance:</p>
+                        <form method="GET" class="space-y-4">
+                            <input type="email" name="email" placeholder="Enter your email" 
+                                   class="w-full px-3 py-2 border rounded" required>
+                            <button type="submit" 
+                                    class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                                Submit
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </body>
+            </html>
+        """)
+         
     data, is_fresh = fetch_local_data(instance, 'home_data')
     if data:
         instance.home_data = data
