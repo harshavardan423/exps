@@ -160,16 +160,25 @@ def fetch_local_data(instance, endpoint):
     
 def check_access(instance, request):
     """Check if current user has access to the instance"""
-    if not instance.expose:
-        return False
-        
-    user_email = request.args.get('email')  # Get email from query params
+    # Get email from query params
+    user_email = request.args.get('email')
     
-    # If no allowed users set, allow all access
-    if not instance.allowed_users:
-        return True
-        
-    return user_email in instance.allowed_users
+    # Try to fetch allowed_users from local instance
+    try:
+        response = requests.get(f"{instance.local_url}/api/allowed_users", timeout=3)
+        if response.ok:
+            allowed_users = response.json().get('allowed_users', [])
+            # If no allowed users set, allow all access
+            if not allowed_users:
+                return True
+            # Check if user email is in allowed users
+            return user_email in allowed_users
+    except Exception as e:
+        print(f"Error checking access: {e}")
+    
+    # If we can't get the allowed users list, default to allowing access
+    # You might want to change this based on your security requirements
+    return True
 
 
 # Routes
@@ -196,7 +205,8 @@ def user_home(username):
     if not instance:
         return jsonify({'error': 'User not found'}), 404
 
-     if not check_access(instance, request):
+    # Fixed indentation
+    if not check_access(instance, request):
         return render_template_string("""
             <!DOCTYPE html>
             <html>
