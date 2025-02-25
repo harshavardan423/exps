@@ -321,16 +321,25 @@ def get_dummy_files(path=''):
         'README.md': {'type': 'file', 'size': '5 KB', 'modified': '2025-01-10'},
     }
     
+    # Default return value if path is not found
+    result = {'folders': [], 'files': []}
+    
     # Navigate to the requested path
-    if path:
+    if not path:
+        current = root
+    else:
         parts = path.strip('/').split('/')
         current = root
-        for part in parts:
-            if part in current and current[part]['type'] == 'folder':
-                current = current[part]['children']
-            else:
-                # Path not found, return empty structure
-                return {'folders': [], 'files': []}
+        try:
+            for part in parts:
+                if part in current and current[part]['type'] == 'folder':
+                    current = current[part]['children']
+                else:
+                    # Path not found, return empty structure
+                    return result
+        except (KeyError, TypeError):
+            # Handle any navigation errors
+            return result
     
     # Convert the current directory structure to the response format
     folders = []
@@ -350,10 +359,12 @@ def get_dummy_files(path=''):
                 'icon': get_file_icon(name)
             })
     
-    return {
+    result = {
         'folders': sorted(folders, key=lambda x: x['name']),
         'files': sorted(files, key=lambda x: x['name'])
     }
+    
+    return result
 
 # Routes
 @app.route('/')
