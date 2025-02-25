@@ -147,29 +147,52 @@ def render_page(username, title, content, instance_status=None):
 
 def fetch_local_data(instance, endpoint):
     """Fetch data from local instance with timeout"""
+    if not instance.is_online():
+        return None, False
+        
     try:
         response = requests.get(
             f"{instance.local_url}/api/{endpoint}",
-            timeout=5
+            timeout=2  # Shorter timeout for better UX
         )
         if response.ok:
             return response.json(), True
-    except:
-        pass
+        else:
+            print(f"Error fetching {endpoint}: {response.status_code}")
+    except requests.exceptions.RequestException as e:
+        print(f"Connection error fetching {endpoint}: {str(e)}")
+    except Exception as e:
+        print(f"Unexpected error fetching {endpoint}: {str(e)}")
+        
     return None, False
     
 def check_access(instance, request):
     """Check if current user has access to the instance"""
-    if not instance.expose:
-        return False
+    # Check if instance is active first
+    if not instance.is_online():
+        return True  # Always show cached data if instance is offline
         
     user_email = request.args.get('email')  # Get email from query params
     
-    # If no allowed users set, allow all access
-    if not instance.allowed_users:
+    # Fetch allowed users from cached data or via API call
+    try:
+        response = requests.get(
+            f"{instance.local_url}/api/allowed_users",
+            timeout=3
+        )
+        if response.ok:
+            allowed_users = response.json().get('allowed_users', [])
+            # If no allowed users set, allow all access
+            if not allowed_users:
+                return True
+            # Otherwise check if user email is in allowed list
+            return user_email in allowed_users
+    except:
+        # If we can't reach the instance, default to allowing access to cached data
         return True
         
-    return user_email in instance.allowed_users
+    # Default case
+    return True
 
 
 # Routes
