@@ -205,17 +205,29 @@ def render_page(username, title, content, instance_status=None):
         instance_status=instance_status
     )
 
-def fetch_local_data(instance, endpoint):
-    """Fetch data from local instance with timeout"""
+def fetch_local_data(instance, endpoint, params=None):
+    """Fetch data from local instance with timeout
+    
+    Args:
+        instance: The ExposedInstance object
+        endpoint: API endpoint to call
+        params: Optional query parameters
+        
+    Returns:
+        (data, is_fresh) tuple, where data is the API response and is_fresh indicates
+        whether the data was successfully retrieved from the instance
+    """
     try:
+        url = f"{instance.local_url}/api/{endpoint}"
         response = requests.get(
-            f"{instance.local_url}/api/{endpoint}",
+            url,
+            params=params,
             timeout=5
         )
         if response.ok:
             return response.json(), True
-    except:
-        pass
+    except Exception as e:
+        print(f"Error fetching data from {endpoint}: {e}")
     return None, False
     
 def check_access(instance, request):
@@ -446,13 +458,61 @@ def user_files(username):
     instance = ExposedInstance.query.filter_by(username=username).first()
     if not instance:
         return jsonify({'error': 'User not found'}), 404
+    
+    if not check_access(instance, request):
+        return render_template_string("""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Access Required</title>
+                <script src="https://cdn.tailwindcss.com"></script>
+            </head>
+            <body class="bg-gray-100">
+                <div class="container mx-auto px-4 py-8">
+                    <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+                        <h1 class="text-2xl font-bold mb-4">Access Required</h1>
+                        <p class="mb-4">Please enter your email to access this instance:</p>
+                        <form method="GET" class="space-y-4">
+                            <input type="email" name="email" placeholder="Enter your email" 
+                                   class="w-full px-3 py-2 border rounded" required>
+                            <button type="submit" 
+                                    class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                                Submit
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </body>
+            </html>
+        """)
         
     path = request.args.get('path', '')
     path_parts = path.strip('/').split('/') if path else []
     parent_path = '/'.join(path_parts[:-1]) if path_parts else ""
     
-    # Generate dummy file data for now
-    file_data = get_dummy_files(path)
+    # Try to get real file data from local instance or cached data
+    data, is_fresh = fetch_local_data(instance, 'files_data', {'path': path})
+    
+    if data:
+        # Update cached data for this path
+        if not instance.files_data:
+            instance.files_data = {}
+        
+        instance.files_data = data
+        instance.last_data_sync = datetime.utcnow()
+        db.session.commit()
+        file_data = data.get('structure', {'folders': [], 'files': []})
+    elif instance.files_data:
+        # Use cached data if available
+        file_data = instance.files_data.get('structure', {'folders': [], 'files': []})
+    else:
+        # Fall back to dummy data if nothing is available
+        file_data = get_dummy_files(path)
+    
+    # Add icons to file data
+    for file in file_data.get('files', []):
+        if 'icon' not in file:
+            file['icon'] = get_file_icon(file['name'])
     
     # Render the file explorer template
     content = render_template_string(
@@ -464,7 +524,9 @@ def user_files(username):
         parent_path=parent_path
     )
     
-    return render_page(username, "Files", content, instance_status='online')
+    return render_page(username, "Files", content, 
+                      instance_status='online' if is_fresh else 'offline')
+    
 
 @app.route('/<username>/behaviors')
 def user_behaviors(username):
