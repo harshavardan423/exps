@@ -219,7 +219,7 @@ def user_home(username):
     if not instance:
         return jsonify({'error': 'User not found'}), 404
 
-     if not check_access(instance, request):
+    if not check_access(instance, request):
         return render_template_string("""
             <!DOCTYPE html>
             <html>
