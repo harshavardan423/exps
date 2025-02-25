@@ -428,7 +428,7 @@ def user_home(username):
             </body>
             </html>
         """)
-            
+
     data, is_fresh = fetch_local_data(instance, 'home_data')
     if data:
         instance.home_data = data
@@ -439,79 +439,82 @@ def user_home(username):
     else:
         data = {"message": "No data available"}
 
-    content = f"""
+    # Create the connections section
+    connections_section = '<div class="text-gray-500 italic">No connections configured</div>'
+    if data.get('connections_data'):
+        connections_section = '<div class="grid grid-cols-2 gap-3">'
+        for k in data['connections_data'].keys():
+            connections_section += f'<div class="bg-gray-50 p-3 rounded">{k}</div>'
+        connections_section += '</div>'
+
+    # Create the apps section
+    apps_section = '<div class="text-gray-500 italic">No apps installed</div>'
+    if data.get('apps'):
+        apps_section = '<div class="grid grid-cols-2 gap-3">'
+        for k in data['apps'].keys():
+            apps_section += f'<div class="bg-gray-50 p-3 rounded">{k}</div>'
+        apps_section += '</div>'
+
+    # Create the sequences section
+    sequences_section = '<div class="text-gray-500 italic">No sequences defined</div>'
+    if data.get('sequences'):
+        sequences_section = ''
+        for seq_name, seq_data in data['sequences'].items():
+            sequences_section += f'''
+                <div class="mb-4 last:mb-0">
+                    <div class="font-medium text-lg mb-2">{seq_name}</div>
+                    <div class="bg-gray-50 p-4 rounded">
+                        <div class="space-y-2">
+            '''
+            for action in seq_data:
+                icon = 'code' if action['type'] == 'actions' else 'cog'
+                sequences_section += f'''
+                    <div class="flex items-center space-x-2">
+                        <span class="text-blue-500">
+                            <i class="fas fa-{icon}"></i>
+                        </span>
+                        <span class="font-medium">{action['name']}</span>
+                    </div>
+                '''
+            sequences_section += '''
+                        </div>
+                    </div>
+                </div>
+            '''
+
+    content = f'''
         <div class="space-y-6">
             <div class="flex items-center space-x-4">
                 <div class="text-2xl font-bold text-gray-700">{data.get('name', username)}'s Dashboard</div>
             </div>
             
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <!-- Connections Section -->
                 <div class="bg-white p-6 rounded-lg shadow">
                     <h2 class="text-xl font-semibold mb-4 text-gray-700">
                         <i class="fas fa-plug mr-2"></i>Connections
                     </h2>
-                    {
-                        '<div class="text-gray-500 italic">No connections configured</div>'
-                        if not data.get('connections_data')
-                        else f'<div class="grid grid-cols-2 gap-3">' +
-                            ''.join([f'<div class="bg-gray-50 p-3 rounded">{k}</div>'
-                                    for k in data['connections_data'].keys()]) +
-                            '</div>'
-                    }
+                    {connections_section}
                 </div>
 
-                <!-- Apps Section -->
                 <div class="bg-white p-6 rounded-lg shadow">
                     <h2 class="text-xl font-semibold mb-4 text-gray-700">
                         <i class="fas fa-cube mr-2"></i>Apps
                     </h2>
-                    {
-                        '<div class="text-gray-500 italic">No apps installed</div>'
-                        if not data.get('apps')
-                        else f'<div class="grid grid-cols-2 gap-3">' +
-                            ''.join([f'<div class="bg-gray-50 p-3 rounded">{k}</div>'
-                                    for k in data['apps'].keys()]) +
-                            '</div>'
-                    }
+                    {apps_section}
                 </div>
             </div>
 
-            <!-- Sequences Section -->
-       
             <div class="bg-white p-6 rounded-lg shadow">
                 <h2 class="text-xl font-semibold mb-4 text-gray-700">
                     <i class="fas fa-code-branch mr-2"></i>Sequences
                 </h2>
-                {
-                    '<div class="text-gray-500 italic">No sequences defined</div>'
-                    if not data.get('sequences')
-                    else ''.join([f'''
-                        <div class="mb-4 last:mb-0">
-                            <div class="font-medium text-lg mb-2">{seq_name}</div>
-                            <div class="bg-gray-50 p-4 rounded">
-                                <div class="space-y-2">
-                                    {''.join([
-                                        f"""
-                                        <div class="flex items-center space-x-2">
-                                            <span class="text-blue-500">
-                                                <i class="fas fa-{'code' if action['type'] == 'actions' else 'cog'}"></i>
-                                            </span>
-                                            <span class="font-medium">{action['name']}</span>
-                                        </div>
-                                        """ for action in seq_data
-                                    ])}
-                                </div>
-                            </div>
-                        </div>
-                    ''' for seq_name, seq_data in data['sequences'].items()])
-                }
+                {sequences_section}
             </div>
         </div>
-    """
+    '''
     
     return render_page(username, "Home", content, 
-                        instance_status='online' if is_fresh else 'offline')
+                      instance_status='online' if is_fresh else 'offline')
 
 
 @app.route('/<username>/files')
