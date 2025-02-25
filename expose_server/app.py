@@ -478,6 +478,7 @@ def user_home(username):
             </div>
 
             <!-- Sequences Section -->
+       
             <div class="bg-white p-6 rounded-lg shadow">
                 <h2 class="text-xl font-semibold mb-4 text-gray-700">
                     <i class="fas fa-code-branch mr-2"></i>Sequences
@@ -490,18 +491,16 @@ def user_home(username):
                             <div class="font-medium text-lg mb-2">{seq_name}</div>
                             <div class="bg-gray-50 p-4 rounded">
                                 <div class="space-y-2">
-                                    {
-                                        ''.join([f"""
-                                            <div class="flex items-center space-x-2">
-                                                <span class="text-blue-500">
-                                                    <i class="fas fa-{
-                                                        'code' if action['type'] == 'actions' else 'cog'
-                                                    }"></i>
-                                                </span>
-                                                <span class="font-medium">{action['name']}</span>
-                                            </div>
-                                        """ for action in seq_data])
-                                    }
+                                    {''.join([
+                                        f"""
+                                        <div class="flex items-center space-x-2">
+                                            <span class="text-blue-500">
+                                                <i class="fas fa-{'code' if action['type'] == 'actions' else 'cog'}"></i>
+                                            </span>
+                                            <span class="font-medium">{action['name']}</span>
+                                        </div>
+                                        """ for action in seq_data
+                                    ])}
                                 </div>
                             </div>
                         </div>
