@@ -417,7 +417,7 @@ def user_home(username):
                         <p class="mb-4">Please enter your email to access this instance:</p>
                         <form method="GET" class="space-y-4">
                             <input type="email" name="email" placeholder="Enter your email" 
-                                   class="w-full px-3 py-2 border rounded" required>
+                                    class="w-full px-3 py-2 border rounded" required>
                             <button type="submit" 
                                     class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
                                 Submit
@@ -428,7 +428,7 @@ def user_home(username):
             </body>
             </html>
         """)
-         
+            
     data, is_fresh = fetch_local_data(instance, 'home_data')
     if data:
         instance.home_data = data
@@ -512,7 +512,8 @@ def user_home(username):
     """
     
     return render_page(username, "Home", content, 
-                      instance_status='online' if is_fresh else 'offline')
+                        instance_status='online' if is_fresh else 'offline')
+
 
 @app.route('/<username>/files')
 def user_files(username):
