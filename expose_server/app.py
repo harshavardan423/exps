@@ -566,12 +566,15 @@ def deregister_instance(token):
     try:
         instance = ExposedInstance.query.filter_by(token=token).first()
         if instance:
+            username = instance.username  # Store username for logging
             db.session.delete(instance)
             db.session.commit()
+            print(f"Successfully deregistered instance for user: {username}")
             return jsonify({'status': 'Instance deregistered successfully'}), 200
         return jsonify({'error': 'Instance not found'}), 404
     except Exception as e:
         db.session.rollback()
+        print(f"Error during deregistration: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.errorhandler(404)
