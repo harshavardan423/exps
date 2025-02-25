@@ -502,6 +502,7 @@ def register_instance():
         user_id = data.get('user_id')
         username = data.get('username')
         local_url = data.get('local_url')
+        initial_data = data.get('initial_data', {})
         
         if not all([user_id, username, local_url]):
             return jsonify({'error': 'Missing required fields'}), 400
@@ -520,6 +521,13 @@ def register_instance():
             )
             db.session.add(instance)
         
+        # Store initial data if provided
+        if initial_data:
+            instance.home_data = initial_data.get('home_data')
+            instance.files_data = initial_data.get('files_data')
+            instance.behaviors_data = initial_data.get('behaviors_data')
+            instance.last_data_sync = datetime.utcnow()
+        
         db.session.commit()
         return jsonify(instance.to_dict()), 200
     except Exception as e:
@@ -534,6 +542,19 @@ def heartbeat(token):
             return jsonify({'error': 'Instance not found'}), 404
         
         instance.last_heartbeat = datetime.utcnow()
+        
+        # Update instance data if provided
+        if request.is_json:
+            data = request.json
+            if data:
+                if 'home_data' in data:
+                    instance.home_data = data['home_data']
+                if 'files_data' in data:
+                    instance.files_data = data['files_data']
+                if 'behaviors_data' in data:
+                    instance.behaviors_data = data['behaviors_data']
+                instance.last_data_sync = datetime.utcnow()
+        
         db.session.commit()
         return jsonify({'status': 'ok'}), 200
     except Exception as e:
