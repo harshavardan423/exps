@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template_string, redirect,session
+from flask import Flask, request, jsonify, render_template_string, redirect, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 import requests
@@ -25,6 +25,7 @@ BASE_TEMPLATE = """
     <title>{{ title }} - {{ username }}'s Atom Instance</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100">
     <nav class="bg-white shadow-lg">
@@ -105,6 +106,65 @@ INDEX_TEMPLATE = """
 </html>
 """
 
+# File explorer template
+FILE_EXPLORER_TEMPLATE = """
+<div class="mb-4">
+    <div class="flex items-center space-x-2 mb-4">
+        <div class="bg-gray-200 text-gray-700 px-3 py-1 rounded-md text-sm">
+            / {{ current_path }}
+        </div>
+        <div class="flex-grow"></div>
+        <button class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">
+            <i class="fas fa-upload mr-1"></i> Upload
+        </button>
+        <button class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm">
+            <i class="fas fa-folder-plus mr-1"></i> New Folder
+        </button>
+    </div>
+    
+    <div class="bg-white border rounded-md">
+        <div class="flex items-center justify-between px-4 py-2 bg-gray-50 border-b font-medium text-sm">
+            <div class="w-1/2">Name</div>
+            <div class="w-1/4 text-center">Size</div>
+            <div class="w-1/4 text-center">Modified</div>
+        </div>
+        
+        {% if current_path != "" %}
+        <div class="flex items-center px-4 py-2 border-b hover:bg-gray-50">
+            <div class="w-1/2 flex items-center">
+                <i class="fas fa-arrow-up text-gray-500 mr-2"></i>
+                <a href="/{{ username }}/files?path={{ parent_path }}" class="text-blue-500 hover:underline">...</a>
+            </div>
+            <div class="w-1/4 text-center text-gray-500">-</div>
+            <div class="w-1/4 text-center text-gray-500">-</div>
+        </div>
+        {% endif %}
+        
+        {% for item in file_data.folders %}
+        <div class="flex items-center px-4 py-2 border-b hover:bg-gray-50">
+            <div class="w-1/2 flex items-center">
+                <i class="fas fa-folder text-yellow-400 mr-2"></i>
+                <a href="/{{ username }}/files?path={{ current_path_prefix }}{{ item.name }}" class="hover:underline">{{ item.name }}</a>
+            </div>
+            <div class="w-1/4 text-center text-gray-500">-</div>
+            <div class="w-1/4 text-center text-gray-500">{{ item.modified }}</div>
+        </div>
+        {% endfor %}
+        
+        {% for item in file_data.files %}
+        <div class="flex items-center px-4 py-2 border-b hover:bg-gray-50">
+            <div class="w-1/2 flex items-center">
+                <i class="{{ item.icon }} mr-2 text-gray-500"></i>
+                <span>{{ item.name }}</span>
+            </div>
+            <div class="w-1/4 text-center text-gray-500">{{ item.size }}</div>
+            <div class="w-1/4 text-center text-gray-500">{{ item.modified }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+"""
+
 # Database Model
 class ExposedInstance(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -180,6 +240,120 @@ def check_access(instance, request):
     # You might want to change this based on your security requirements
     return True
 
+def get_file_icon(filename):
+    """Get appropriate Font Awesome icon for file type"""
+    ext = filename.split('.')[-1].lower() if '.' in filename else ''
+    
+    icons = {
+        'pdf': 'fas fa-file-pdf text-red-500',
+        'doc': 'fas fa-file-word text-blue-500',
+        'docx': 'fas fa-file-word text-blue-500',
+        'xls': 'fas fa-file-excel text-green-500',
+        'xlsx': 'fas fa-file-excel text-green-500',
+        'ppt': 'fas fa-file-powerpoint text-orange-500',
+        'pptx': 'fas fa-file-powerpoint text-orange-500',
+        'jpg': 'fas fa-file-image text-purple-500',
+        'jpeg': 'fas fa-file-image text-purple-500',
+        'png': 'fas fa-file-image text-purple-500',
+        'gif': 'fas fa-file-image text-purple-500',
+        'txt': 'fas fa-file-alt',
+        'md': 'fas fa-file-alt',
+        'py': 'fab fa-python text-blue-500',
+        'js': 'fab fa-js text-yellow-500',
+        'html': 'fab fa-html5 text-orange-500',
+        'css': 'fab fa-css3 text-blue-500',
+        'json': 'fas fa-file-code',
+    }
+    
+    return icons.get(ext, 'fas fa-file')
+
+def get_dummy_files(path=''):
+    """Generate dummy file structure based on path"""
+    # Mock file system structure
+    root = {
+        'documents': {
+            'type': 'folder',
+            'children': {
+                'reports': {
+                    'type': 'folder',
+                    'children': {
+                        'q1_report.pdf': {'type': 'file', 'size': '2.3 MB', 'modified': '2025-02-01'},
+                        'q2_report.pdf': {'type': 'file', 'size': '3.1 MB', 'modified': '2025-02-15'},
+                    }
+                },
+                'project_proposal.docx': {'type': 'file', 'size': '546 KB', 'modified': '2025-01-20'},
+                'budget.xlsx': {'type': 'file', 'size': '1.2 MB', 'modified': '2025-02-10'},
+            }
+        },
+        'images': {
+            'type': 'folder',
+            'children': {
+                'profile.jpg': {'type': 'file', 'size': '1.5 MB', 'modified': '2025-01-15'},
+                'background.png': {'type': 'file', 'size': '2.8 MB', 'modified': '2025-01-22'},
+            }
+        },
+        'code': {
+            'type': 'folder',
+            'children': {
+                'projects': {
+                    'type': 'folder',
+                    'children': {
+                        'atom': {
+                            'type': 'folder',
+                            'children': {
+                                'main.py': {'type': 'file', 'size': '4.2 KB', 'modified': '2025-02-18'},
+                                'utils.py': {'type': 'file', 'size': '2.7 KB', 'modified': '2025-02-18'},
+                                'config.json': {'type': 'file', 'size': '1.3 KB', 'modified': '2025-02-17'},
+                            }
+                        }
+                    }
+                },
+                'snippets': {
+                    'type': 'folder',
+                    'children': {
+                        'script.js': {'type': 'file', 'size': '1.8 KB', 'modified': '2025-02-05'},
+                        'style.css': {'type': 'file', 'size': '3.4 KB', 'modified': '2025-02-08'},
+                    }
+                }
+            }
+        },
+        'notes.txt': {'type': 'file', 'size': '12 KB', 'modified': '2025-02-20'},
+        'README.md': {'type': 'file', 'size': '5 KB', 'modified': '2025-01-10'},
+    }
+    
+    # Navigate to the requested path
+    if path:
+        parts = path.strip('/').split('/')
+        current = root
+        for part in parts:
+            if part in current and current[part]['type'] == 'folder':
+                current = current[part]['children']
+            else:
+                # Path not found, return empty structure
+                return {'folders': [], 'files': []}
+    
+    # Convert the current directory structure to the response format
+    folders = []
+    files = []
+    
+    for name, item in current.items():
+        if item['type'] == 'folder':
+            folders.append({
+                'name': name,
+                'modified': '2025-02-20'  # Default date for folders
+            })
+        else:
+            files.append({
+                'name': name,
+                'size': item['size'],
+                'modified': item['modified'],
+                'icon': get_file_icon(name)
+            })
+    
+    return {
+        'folders': sorted(folders, key=lambda x: x['name']),
+        'files': sorted(files, key=lambda x: x['name'])
+    }
 
 # Routes
 @app.route('/')
@@ -261,26 +435,25 @@ def user_files(username):
     instance = ExposedInstance.query.filter_by(username=username).first()
     if not instance:
         return jsonify({'error': 'User not found'}), 404
-
-    data, is_fresh = fetch_local_data(instance, 'files_data')
-    if data:
-        instance.files_data = data
-        instance.last_data_sync = datetime.utcnow()
-        db.session.commit()
-    elif instance.files_data:
-        data = instance.files_data
-    else:
-        data = {"message": "No files data available"}
-
-    content = f"""
-        <div class="space-y-4">
-            <div class="text-lg">Files View</div>
-            <pre class="bg-gray-100 p-4 rounded overflow-auto">{str(data)}</pre>
-        </div>
-    """
+        
+    path = request.args.get('path', '')
+    path_parts = path.strip('/').split('/') if path else []
+    parent_path = '/'.join(path_parts[:-1]) if path_parts else ""
     
-    return render_page(username, "Files", content,
-                      instance_status='online' if is_fresh else 'offline')
+    # Generate dummy file data for now
+    file_data = get_dummy_files(path)
+    
+    # Render the file explorer template
+    content = render_template_string(
+        FILE_EXPLORER_TEMPLATE,
+        username=username,
+        file_data=file_data,
+        current_path=path,
+        current_path_prefix=path + '/' if path else '',
+        parent_path=parent_path
+    )
+    
+    return render_page(username, "Files", content, instance_status='online')
 
 @app.route('/<username>/behaviors')
 def user_behaviors(username):
